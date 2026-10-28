@@ -1,0 +1,12 @@
+# binarios del motor
+motor/motor
+motor/comparar
+motor/generar
+motor/arnes
+*.o
+
+# imágenes de trabajo: la de medición la escribe el generador
+*.ppm
+*.pgm
+!motor/tests/datos/*.ppm
+!motor/tests/datos/*.pgm
