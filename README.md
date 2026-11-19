@@ -8,7 +8,7 @@ despachador que reparte el lote entre varios trabajadores.
 | Nombre completo | Código | Correo institucional |
 |---|---|---|
 | Miguel Angel Arboleda Grueso | 2160253 | miguel.arboleda@correounivalle.edu.co |
-|  |  |  |
+| Daniel Felipe Gonzalez Perez | 2459631 | daniel.gonzalez.perez@correounivalle.edu.co |
 |  |  |  |
 
 El informe está en [`docs/`](docs/).
