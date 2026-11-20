@@ -28,10 +28,10 @@ deploy/nube/      los manifiestos del clúster
 docs/             el informe, en cuatro archivos más el índice
 ```
 
-De los filtros vienen resueltos la escala de grises y el desenfoque de caja de
-3x3, cada uno en su versión secuencial y en su versión paralela. El desenfoque
-gaussiano separable, Sobel y el histograma con Otsu están declarados en
-`motor/src/filtros.hpp` y sin implementar.
+Están resueltos la escala de grises, el desenfoque de caja de 3x3 y el
+desenfoque gaussiano separable (este último con una variante por bandas,
+`gaussiano_bandas`, ver `docs/02-motor.md`). Sobel y el histograma con Otsu
+están declarados en `motor/src/filtros.hpp` y sin implementar.
 
 ## Construir y correr el motor
 
@@ -117,6 +117,20 @@ deja la tabla completa en `mediciones/motor.csv`:
 $ bash bench/medir.sh /tmp/medicion.ppm gris caja
 escrito ../mediciones/motor.csv con 40 filas
 ```
+
+## Trabajador y despachador
+
+```console
+$ cd motor && make && cd ..
+$ PUERTO=8081 python3 trabajador/trabajador.py &
+$ PUERTO=8082 python3 trabajador/trabajador.py &
+$ python3 despachador/despachador.py --trabajadores http://localhost:8081,http://localhost:8082 \
+      --filtros gris,gaussiano --entrada lote/ --salida resultado/
+$ bash despachador/pruebas.sh
+```
+
+La API del trabajador y el reparto están en `docs/01-arquitectura.md`. No
+hacen falta paquetes de Python fuera de la biblioteca estándar.
 
 ## Convenciones que no cambian
 
