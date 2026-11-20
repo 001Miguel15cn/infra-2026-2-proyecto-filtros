@@ -28,6 +28,17 @@ revisar "gris sobre la imagen de prueba" ./comparar "$trabajo/gris.pgm" tests/da
 ./motor caja tests/datos/entrada.ppm "$trabajo/caja.ppm"
 revisar "caja sobre la imagen de prueba" ./comparar "$trabajo/caja.ppm" tests/datos/caja.ppm
 
+./motor gaussiano tests/datos/entrada.ppm "$trabajo/gauss.ppm"
+revisar "gaussiano sobre la imagen de prueba" ./comparar "$trabajo/gauss.ppm" tests/datos/gaussiano.ppm
+./motor gaussiano tests/datos/gris.pgm "$trabajo/gauss1.pgm"
+revisar "gaussiano sobre un canal" ./comparar "$trabajo/gauss1.pgm" tests/datos/gaussiano_gris.pgm
+# 37x41 no es múltiplo de la banda: la última tiene 9 filas.
+for filtro in gaussiano gaussiano_bandas; do
+    ./motor "$filtro" tests/datos/medio.ppm "$trabajo/medio.ppm"
+    revisar "$filtro sobre 37x41, contra la implementación aparte" \
+        ./comparar "$trabajo/medio.ppm" tests/datos/gaussiano_medio.ppm
+done
+
 echo "Lectura y escritura:"
 ./motor gris tests/datos/gris.pgm "$trabajo/vuelta.pgm" 2> "$trabajo/err.txt"
 if grep -q "tres canales" "$trabajo/err.txt"; then
@@ -42,11 +53,22 @@ revisar "caja sobre un canal escribe P5" bash -c \
 
 echo "Paralelo contra secuencial, imagen de 512x512:"
 ./generar "$trabajo/grande.ppm" 512 512 > /dev/null
-for filtro in gris caja; do
+for filtro in gris caja gaussiano gaussiano_bandas; do
     ./motor "$filtro" "$trabajo/grande.ppm" "$trabajo/$filtro-par" 
     ./motor "$filtro" "$trabajo/grande.ppm" "$trabajo/$filtro-sec" --secuencial
     revisar "$filtro idéntico con uno y con varios hilos" \
         ./comparar "$trabajo/$filtro-par" "$trabajo/$filtro-sec"
+done
+
+echo "Tamaños pequeños y bordes, gaussiano:"
+# Imágenes más angostas o más bajas que el núcleo: todo es borde.
+for tam in "1 1" "2 3" "5 1" "1 7" "16 16" "17 33"; do
+    ./generar "$trabajo/t.ppm" $tam > /dev/null
+    ./motor gaussiano "$trabajo/t.ppm" "$trabajo/t-sec" --secuencial
+    ./motor gaussiano "$trabajo/t.ppm" "$trabajo/t-par"
+    ./motor gaussiano_bandas "$trabajo/t.ppm" "$trabajo/t-ban"
+    revisar "gaussiano ${tam/ /x}: dos pasadas y bandas iguales a la secuencial" bash -c \
+        "./comparar '$trabajo/t-sec' '$trabajo/t-par' && ./comparar '$trabajo/t-sec' '$trabajo/t-ban'"
 done
 
 echo "Filtro desconocido:"
