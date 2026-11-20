@@ -19,6 +19,11 @@ Imagen caja_paralelo(const Imagen& e);
 Imagen gaussiano_secuencial(const Imagen& e);
 Imagen gaussiano_paralelo(const Imagen& e);
 
+// Misma salida que gaussiano_paralelo, pero por bandas de filas para que la
+// intermedia quepa en caché. Se pide con el nombre "gaussiano_bandas".
+const int BANDA_FILAS = 32;
+Imagen gaussiano_paralelo_bandas(const Imagen& e);
+
 // Magnitud del gradiente de Sobel sobre una imagen de un canal.
 Imagen sobel_secuencial(const Imagen& e);
 Imagen sobel_paralelo(const Imagen& e);
