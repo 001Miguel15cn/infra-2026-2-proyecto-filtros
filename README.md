@@ -9,6 +9,7 @@ despachador que reparte el lote entre varios trabajadores.
 |---|---|---|
 | Miguel Angel Arboleda Grueso | 2160253 | miguel.arboleda@correounivalle.edu.co |
 | Daniel Felipe Gonzalez Perez | 2459631 | daniel.gonzalez.perez@correounivalle.edu.co |
+| Sebastian Devia Acosta|202459664| devia.sebastian@correounivalle.edu.co|
 |  |  |  |
 
 El informe está en [`docs/`](docs/).
