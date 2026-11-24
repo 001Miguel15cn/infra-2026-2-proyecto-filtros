@@ -10,7 +10,7 @@ namespace {
 
 const char* USO =
     "uso: motor <filtros> <entrada> <salida> [--secuencial]\n"
-    "  filtros: lista separada por comas de gris, caja, gaussiano, sobel, otsu\n"
+    "  filtros: lista separada por comas de gris, caja, gaussiano, gaussiano_bandas, sobel, otsu\n"
     "  ejemplo: motor gris,gaussiano,sobel,otsu entrada.ppm salida.pgm\n";
 
 std::vector<std::string> partir(const std::string& lista) {
@@ -24,7 +24,7 @@ std::vector<std::string> partir(const std::string& lista) {
 }
 
 bool conocido(const std::string& filtro) {
-    return filtro == "gris" || filtro == "caja" || filtro == "gaussiano" ||
+    return filtro == "gris" || filtro == "caja" || filtro == "gaussiano" || filtro == "gaussiano_bandas" ||
            filtro == "sobel" || filtro == "otsu";
 }
 
@@ -33,6 +33,9 @@ Imagen aplicar(const std::string& filtro, const Imagen& entrada, bool secuencial
     if (filtro == "caja") return secuencial ? caja_secuencial(entrada) : caja_paralelo(entrada);
     if (filtro == "gaussiano") {
         return secuencial ? gaussiano_secuencial(entrada) : gaussiano_paralelo(entrada);
+    }
+    if (filtro == "gaussiano_bandas") {
+        return secuencial ? gaussiano_secuencial(entrada) : gaussiano_paralelo_bandas(entrada);
     }
     if (filtro == "sobel") return secuencial ? sobel_secuencial(entrada) : sobel_paralelo(entrada);
     if (filtro == "otsu") return secuencial ? otsu_secuencial(entrada) : otsu_paralelo(entrada);
