@@ -47,9 +47,9 @@ del primer `for`.
 - `bash bench/medir.sh imagen.ppm gaussiano gaussiano_bandas` deja
   `mediciones/motor.csv`, y `python3 bench/resumir.py` saca las tablas.
 
-Máquina: Lenovo LOQ 15IAX9E, Intel Core i5-XXXXX (N núcleos físicos, M hilos),
-16 GB de RAM, SSD de 512 GB, Windows <versión>, g++ 16.2.0 (MSYS2 UCRT64) con
-`-O2 -fopenmp`. La GPU (RTX 3050) no se usa: el motor corre solo en CPU. El
+Máquina: Lenovo LOQ 15IAX9E, Intel Core i5-XXXXX (N núcleos físicos, 12 hilos),
+16 GB de RAM, SSD de 512 GB, Windows 11 Pro, g++ 16.2.0 (MSYS2 UCRT64) con
+`-O2 -fopenmp`. El
 reloj de `omp_get_wtime` en esta plataforma avanza de a 0.5 ms, que no
 afecta a tiempos de 80 ms o más.
 
