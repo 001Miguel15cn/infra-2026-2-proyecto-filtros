@@ -23,3 +23,4 @@ for filtro in "$@"; do
 done
 
 echo "escrito $salida con $(( $(wc -l < "$salida") - 1 )) filas"
+
