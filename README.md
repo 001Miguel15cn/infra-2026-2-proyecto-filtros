@@ -29,10 +29,10 @@ deploy/nube/      los manifiestos del clúster
 docs/             el informe, en cuatro archivos más el índice
 ```
 
-Están resueltos la escala de grises, el desenfoque de caja de 3x3 y el
+Están resueltos la escala de grises, el desenfoque de caja de 3x3, el
 desenfoque gaussiano separable (este último con una variante por bandas,
-`gaussiano_bandas`, ver `docs/02-motor.md`). Sobel y el histograma con Otsu
-están declarados en `motor/src/filtros.hpp` y sin implementar.
+`gaussiano_bandas`) y Sobel; ver `docs/02-motor.md`. El histograma con Otsu
+está declarado en `motor/src/filtros.hpp` y sin implementar.
 
 ## Construir y correr el motor
 
@@ -67,12 +67,41 @@ $ make pruebas
 Salida esperada, calculada aparte:
   ok    gris sobre la imagen de prueba
   ok    caja sobre la imagen de prueba
+  ok    gaussiano sobre la imagen de prueba
+  ok    gaussiano sobre un canal
+  ok    gaussiano sobre 37x41, contra la implementación aparte
+  ok    gaussiano_bandas sobre 37x41, contra la implementación aparte
 Lectura y escritura:
   ok    gris rechaza una imagen de un canal
   ok    caja sobre un canal escribe P5
 Paralelo contra secuencial, imagen de 512x512:
   ok    gris idéntico con uno y con varios hilos
   ok    caja idéntico con uno y con varios hilos
+  ok    gaussiano idéntico con uno y con varios hilos
+  ok    gaussiano_bandas idéntico con uno y con varios hilos
+Tamaños pequeños y bordes, gaussiano:
+  ok    gaussiano 1x1: dos pasadas y bandas iguales a la secuencial
+  ok    gaussiano 2x3: dos pasadas y bandas iguales a la secuencial
+  ok    gaussiano 5x1: dos pasadas y bandas iguales a la secuencial
+  ok    gaussiano 1x7: dos pasadas y bandas iguales a la secuencial
+  ok    gaussiano 16x16: dos pasadas y bandas iguales a la secuencial
+  ok    gaussiano 17x33: dos pasadas y bandas iguales a la secuencial
+Sobel:
+  ok    sobel sobre la imagen de prueba de 4x3
+  ok    sobel sobre 37x41, contra la implementación aparte
+  ok    sobel de una imagen constante da cero en todos los píxeles
+Sobel, paralelo contra secuencial, imagen de 512x512:
+  ok    sobel idéntico a la secuencial con 1 hilos
+  ok    gris,gaussiano,sobel idéntica a la secuencial con 1 hilos
+  ok    sobel idéntico a la secuencial con 8 hilos
+  ok    gris,gaussiano,sobel idéntica a la secuencial con 8 hilos
+Tamaños pequeños y bordes, sobel:
+  ok    sobel 1x1: paralelo igual a la secuencial
+  ok    sobel 2x3: paralelo igual a la secuencial
+  ok    sobel 5x1: paralelo igual a la secuencial
+  ok    sobel 1x7: paralelo igual a la secuencial
+  ok    sobel 16x16: paralelo igual a la secuencial
+  ok    sobel 17x33: paralelo igual a la secuencial
 Filtro desconocido:
   ok    la cadena con un filtro inexistente se rechaza
 Cadenas que no se pueden aplicar:
@@ -81,6 +110,21 @@ Cadenas que no se pueden aplicar:
   ok    otsu se rechaza antes de aplicar nada
 
 todas las pruebas pasaron
+```
+
+## Ambiente de Python
+
+El entorno local incluye NumPy, requerido por las implementaciones aparte que
+calculan las salidas esperadas (`tests/esperado_gaussiano.py` y
+`tests/esperado_sobel.py`). Solo hace falta para regenerar esos archivos:
+`make pruebas` compara contra los que ya están versionados en `tests/datos/`.
+
+```console
+$ python3 -m venv .venv
+$ .venv/bin/python -m pip install -r requirements.txt
+$ cd motor
+$ ../.venv/bin/python tests/esperado_gaussiano.py tests/datos/entrada.ppm /tmp/esperado.ppm
+$ ../.venv/bin/python tests/esperado_sobel.py tests/datos/gris.pgm /tmp/esperado.pgm
 ```
 
 Las salidas esperadas de `tests/datos/` se calcularon con una implementación
@@ -112,7 +156,10 @@ gris con 1 hilo: mediana 2.28067 ms sobre 2 corridas
 ```
 
 `bench/medir.sh` recorre 1, 2, 4 y 8 hilos para los filtros que se le pasen y
-deja la tabla completa en `mediciones/motor.csv`:
+deja la tabla completa en `mediciones/motor.csv` (sobrescribe el archivo, así
+que se le pasan todos los filtros juntos). Se le da la imagen de color; `sobel`,
+`otsu` y `ecualizar` se miden sobre la salida de `gris`, que calcula antes de
+empezar a cronometrar:
 
 ```console
 $ bash bench/medir.sh /tmp/medicion.ppm gris caja
