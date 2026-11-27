@@ -1,0 +1,52 @@
+# Servicio completo en local, con una sola orden desde esta carpeta:
+#
+#   docker compose up --build --scale trabajador=4
+#
+# El despachador genera el lote de 64 imágenes de 1024x1024 la primera vez
+# (entrada/ vacía), espera a que los trabajadores estén listos, procesa el lote,
+# imprime el throughput y agrega una fila a servicio.csv dentro del volumen.
+# Las variables de ejemplo (HILOS, CONCURRENCIA, FILTROS) se pueden fijar en el
+# entorno o en un archivo .env junto a este archivo.
+name: filtros
+
+services:
+  trabajador:
+    build:
+      # El contexto es la raíz del repositorio: la imagen compila el motor, que
+      # vive en ../../motor, fuera de la carpeta del trabajador.
+      context: ../..
+      dockerfile: trabajador/Dockerfile
+    environment:
+      # Hilos de OpenMP por réplica. Con N réplicas, N x este valor es la
+      # carga total de hilos sobre la máquina.
+      OMP_NUM_THREADS: "${HILOS:-2}"
+    # Sin "ports" ni "container_name": con --scale hay varias réplicas y cada
+    # una se alcanza por el nombre del servicio dentro de la red de Compose.
+    # La sonda de readiness (/readyz) viene definida en el Dockerfile.
+    # Los trabajadores NO montan ningún volumen: no comparten estado.
+
+  despachador:
+    build:
+      context: ../..
+      dockerfile: despachador/Dockerfile
+    environment:
+      # Siempre el mismo nombre: la resolución de nombres de Compose reparte
+      # entre las réplicas. Subir el número de trabajadores no cambia nada aquí.
+      URL_TRABAJADOR: "http://trabajador:8000"
+      CONCURRENCIA: "${CONCURRENCIA:-8}"
+      FILTROS: "${FILTROS:-gris,gaussiano,sobel,otsu}"
+      GENERAR: "64"
+      TAM: "1024x1024"
+      ENTORNO: "local"
+      # Solo es la etiqueta de la columna "trabajadores" del reporte; el
+      # despachador no la usa para repartir. medir.sh la fija.
+      TRABAJADORES_REPORTE: "${TRABAJADORES:-1}"
+    volumes:
+      # El almacenamiento (entrada/ y salida/) lo monta solo el despachador.
+      - lote:/datos
+    depends_on:
+      trabajador:
+        condition: service_healthy
+
+volumes:
+  lote:

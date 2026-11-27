@@ -1,0 +1,16 @@
+# Las imágenes se construyen con la raíz del repositorio como contexto; solo
+# hace falta el código fuente.
+.git
+.github
+docs
+mediciones
+deploy
+**/__pycache__
+**/*.ppm
+**/*.pgm
+motor/motor
+motor/comparar
+motor/generar
+motor/arnes
+motor/bench
+motor/tests
