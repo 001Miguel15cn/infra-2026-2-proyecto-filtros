@@ -10,3 +10,6 @@ motor/arnes
 *.pgm
 !motor/tests/datos/*.ppm
 !motor/tests/datos/*.pgm
+
+# entorno local de Python
+.venv/

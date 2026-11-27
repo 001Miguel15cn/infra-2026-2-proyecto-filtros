@@ -3,6 +3,8 @@
 # que el repositorio trae calculada, y después la versión paralela contra la
 # secuencial sobre una imagen grande, donde el reparto entre hilos sí tiene
 # efecto.
+
+#archivo /tests/pruebas.sh
 set -uo pipefail
 
 cd "$(dirname "$0")/.."
@@ -69,6 +71,51 @@ for tam in "1 1" "2 3" "5 1" "1 7" "16 16" "17 33"; do
     ./motor gaussiano_bandas "$trabajo/t.ppm" "$trabajo/t-ban"
     revisar "gaussiano ${tam/ /x}: dos pasadas y bandas iguales a la secuencial" bash -c \
         "./comparar '$trabajo/t-sec' '$trabajo/t-par' && ./comparar '$trabajo/t-sec' '$trabajo/t-ban'"
+done
+
+echo "Sobel:"
+# Sobel pide un canal, así que se le da la salida de gris. Las salidas
+# esperadas de tests/datos/ las calculó tests/esperado_sobel.py, aparte.
+./motor sobel tests/datos/gris.pgm "$trabajo/sobel_gris.pgm"
+revisar "sobel sobre la imagen de prueba de 4x3" \
+    ./comparar "$trabajo/sobel_gris.pgm" tests/datos/sobel_gris.pgm
+./motor gris tests/datos/medio.ppm "$trabajo/medio_gris.pgm"
+./motor sobel "$trabajo/medio_gris.pgm" "$trabajo/sobel_medio.pgm"
+revisar "sobel sobre 37x41, contra la implementación aparte" \
+    ./comparar "$trabajo/sobel_medio.pgm" tests/datos/sobel_medio.pgm
+
+# Una imagen sin cambios no tiene bordes: la salida es cero en todos los píxeles.
+printf 'P5\n5 4\n255\n' > "$trabajo/constante.pgm"
+head -c 20 /dev/zero | tr '\0' '\310' >> "$trabajo/constante.pgm"
+printf 'P5\n5 4\n255\n' > "$trabajo/ceros.pgm"
+head -c 20 /dev/zero >> "$trabajo/ceros.pgm"
+./motor sobel "$trabajo/constante.pgm" "$trabajo/sobel_constante.pgm"
+revisar "sobel de una imagen constante da cero en todos los píxeles" \
+    ./comparar "$trabajo/sobel_constante.pgm" "$trabajo/ceros.pgm"
+
+echo "Sobel, paralelo contra secuencial, imagen de 512x512:"
+./generar "$trabajo/s_grande.ppm" 512 512 > /dev/null
+./motor gris "$trabajo/s_grande.ppm" "$trabajo/s_grande.pgm"
+./motor sobel "$trabajo/s_grande.pgm" "$trabajo/sobel-sec" --secuencial
+./motor gris,gaussiano,sobel "$trabajo/s_grande.ppm" "$trabajo/cadena-sec" --secuencial
+for hilos in 1 8; do
+    OMP_NUM_THREADS=$hilos ./motor sobel "$trabajo/s_grande.pgm" "$trabajo/sobel-par$hilos"
+    revisar "sobel idéntico a la secuencial con $hilos hilos" \
+        ./comparar "$trabajo/sobel-par$hilos" "$trabajo/sobel-sec"
+    OMP_NUM_THREADS=$hilos ./motor gris,gaussiano,sobel "$trabajo/s_grande.ppm" "$trabajo/cadena-par$hilos"
+    revisar "gris,gaussiano,sobel idéntica a la secuencial con $hilos hilos" \
+        ./comparar "$trabajo/cadena-par$hilos" "$trabajo/cadena-sec"
+done
+
+echo "Tamaños pequeños y bordes, sobel:"
+# Imágenes más angostas o más bajas que la máscara: todo es borde.
+for tam in "1 1" "2 3" "5 1" "1 7" "16 16" "17 33"; do
+    ./generar "$trabajo/t.ppm" $tam > /dev/null
+    ./motor gris "$trabajo/t.ppm" "$trabajo/t.pgm"
+    ./motor sobel "$trabajo/t.pgm" "$trabajo/ts-sec" --secuencial
+    OMP_NUM_THREADS=8 ./motor sobel "$trabajo/t.pgm" "$trabajo/ts-par"
+    revisar "sobel ${tam/ /x}: paralelo igual a la secuencial" \
+        ./comparar "$trabajo/ts-sec" "$trabajo/ts-par"
 done
 
 echo "Filtro desconocido:"

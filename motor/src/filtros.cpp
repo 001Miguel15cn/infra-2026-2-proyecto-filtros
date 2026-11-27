@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <stdexcept>
 #include <vector>
+#include <cstdint>
+#include <cmath>
 
 Imagen gris_secuencial(const Imagen& e) {
     if (e.canales != 3) throw std::runtime_error("gris espera una imagen de tres canales");
@@ -197,13 +199,56 @@ Imagen gaussiano_paralelo_bandas(const Imagen& e) {
     return s;
 }
 
-Imagen sobel_secuencial(const Imagen&) {
-    throw std::runtime_error("sobel: sin implementar");
+namespace {
+
+void exigir_un_canal(const Imagen& e, const char* nombre) {
+    if (e.canales != 1) {
+        throw std::runtime_error(std::string(nombre) + " espera una imagen de un canal");
+    }
 }
 
-Imagen sobel_paralelo(const Imagen&) {
-    throw std::runtime_error("sobel: sin implementar");
+Imagen vacia_como(const Imagen& e, int canales) {
+    Imagen s;
+    s.ancho = e.ancho;
+    s.alto = e.alto;
+    s.canales = canales;
+    s.datos.resize(static_cast<std::size_t>(e.ancho) * e.alto * canales);
+    return s;
 }
+
+unsigned char sobel_pixel(const Imagen& e, int x, int y) {
+    int v[3][3];
+    for (int j = -1; j <= 1; ++j) {
+        const int fila = recortar(y + j, e.alto);
+        for (int i = -1; i <= 1; ++i) {
+            v[j + 1][i + 1] = e.en(recortar(x + i, e.ancho), fila, 0);
+        }
+    }
+    const int gx = -v[0][0] + v[0][2] - 2 * v[1][0] + 2 * v[1][2] - v[2][0] + v[2][2];
+    const int gy = -v[0][0] - 2 * v[0][1] - v[0][2] + v[2][0] + 2 * v[2][1] + v[2][2];
+    return redondear(std::sqrt(static_cast<double>(gx * gx + gy * gy)));
+}
+}  // namespace
+
+Imagen sobel_secuencial(const Imagen& e) {
+    exigir_un_canal(e, "sobel");
+    Imagen s = vacia_como(e, 1);
+    for (int y = 0; y < e.alto; ++y) {
+        for (int x = 0; x < e.ancho; ++x) s.poner(x, y, 0, sobel_pixel(e, x, y));
+    }
+    return s;
+}
+
+Imagen sobel_paralelo(const Imagen& e) {
+    exigir_un_canal(e, "sobel");
+    Imagen s = vacia_como(e, 1);
+    #pragma omp parallel for schedule(static)
+    for (int y = 0; y < e.alto; ++y) {
+        for (int x = 0; x < e.ancho; ++x) s.poner(x, y, 0, sobel_pixel(e, x, y));
+    }
+    return s;
+}
+
 
 Imagen otsu_secuencial(const Imagen&) {
     throw std::runtime_error("otsu: sin implementar");
