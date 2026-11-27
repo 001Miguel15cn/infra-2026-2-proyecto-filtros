@@ -146,6 +146,28 @@ Imagen gaussiano_secuencial(const Imagen& e) {
     return s;
 }
 
+// Forma directa del enunciado: 25 multiplicaciones por píxel y por canal. Los
+// pesos NUCLEO[j]*NUCLEO[i] son enteros y se divide entre 256 al final, así que
+// la suma en double es exacta y da el mismo resultado que la separable.
+Imagen gaussiano_directo(const Imagen& e) {
+    Imagen s = vacia_como(e);
+    for (int y = 0; y < e.alto; ++y) {
+        for (int x = 0; x < e.ancho; ++x) {
+            for (int c = 0; c < e.canales; ++c) {
+                double suma = 0.0;
+                for (int j = -2; j <= 2; ++j) {
+                    const int fila = recortar(y + j, e.alto);
+                    for (int i = -2; i <= 2; ++i) {
+                        suma += NUCLEO[j + 2] * NUCLEO[i + 2] * e.en(recortar(x + i, e.ancho), fila, c);
+                    }
+                }
+                s.poner(x, y, c, redondear(suma / 256.0));
+            }
+        }
+    }
+    return s;
+}
+
 // Versión paralela directa: dos pasadas sobre toda la imagen, con la imagen
 // intermedia completa en memoria (en double, 8 bytes por componente).
 Imagen gaussiano_paralelo(const Imagen& e) {

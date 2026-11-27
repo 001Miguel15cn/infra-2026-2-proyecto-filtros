@@ -30,7 +30,8 @@ docs/             el informe, en cuatro archivos más el índice
 
 Están resueltos la escala de grises, el desenfoque de caja de 3x3 y el
 desenfoque gaussiano separable (este último con una variante por bandas,
-`gaussiano_bandas`, ver `docs/02-motor.md`). Sobel y el histograma con Otsu
+`gaussiano_bandas`, y la forma directa 5x5 `gaussiano_directo` para
+compararlos, ver `docs/02-motor.md`). Sobel y el histograma con Otsu
 están declarados en `motor/src/filtros.hpp` y sin implementar.
 
 ## Construir y correr el motor
@@ -66,12 +67,33 @@ $ make pruebas
 Salida esperada, calculada aparte:
   ok    gris sobre la imagen de prueba
   ok    caja sobre la imagen de prueba
+  ok    gaussiano sobre la imagen de prueba
+  ok    gaussiano sobre un canal
+  ok    gaussiano sobre 37x41, contra la implementación aparte
+  ok    gaussiano_directo sobre 37x41, contra la implementación aparte
+  ok    gaussiano_bandas sobre 37x41, contra la implementación aparte
 Lectura y escritura:
   ok    gris rechaza una imagen de un canal
   ok    caja sobre un canal escribe P5
-Paralelo contra secuencial, imagen de 512x512:
-  ok    gris idéntico con uno y con varios hilos
-  ok    caja idéntico con uno y con varios hilos
+Paralelo contra secuencial, imagen de 512x512, con 1 y con 8 hilos:
+  ok    gris idéntico a la secuencial con 1 hilo(s)
+  ok    gris idéntico a la secuencial con 8 hilo(s)
+  ok    caja idéntico a la secuencial con 1 hilo(s)
+  ok    caja idéntico a la secuencial con 8 hilo(s)
+  ok    gaussiano idéntico a la secuencial con 1 hilo(s)
+  ok    gaussiano idéntico a la secuencial con 8 hilo(s)
+  ok    gaussiano_bandas idéntico a la secuencial con 1 hilo(s)
+  ok    gaussiano_bandas idéntico a la secuencial con 8 hilo(s)
+  ok    gaussiano_directo (5x5) idéntico a la separable secuencial
+  ok    cadena gris,gaussiano idéntica a la secuencial con 1 hilo(s)
+  ok    cadena gris,gaussiano idéntica a la secuencial con 8 hilo(s)
+Tamaños pequeños y bordes, gaussiano:
+  ok    gaussiano 1x1: dos pasadas, bandas y directo iguales a la secuencial
+  ok    gaussiano 2x3: dos pasadas, bandas y directo iguales a la secuencial
+  ok    gaussiano 5x1: dos pasadas, bandas y directo iguales a la secuencial
+  ok    gaussiano 1x7: dos pasadas, bandas y directo iguales a la secuencial
+  ok    gaussiano 16x16: dos pasadas, bandas y directo iguales a la secuencial
+  ok    gaussiano 17x33: dos pasadas, bandas y directo iguales a la secuencial
 Filtro desconocido:
   ok    la cadena con un filtro inexistente se rechaza
 Cadenas que no se pueden aplicar:
@@ -120,17 +142,39 @@ escrito ../mediciones/motor.csv con 40 filas
 
 ## Trabajador y despachador
 
+Sin contenedores, con un solo trabajador (el despachador pide siempre a
+`URL_TRABAJADOR` y no sabe cuántos hay detrás):
+
 ```console
 $ cd motor && make && cd ..
-$ PUERTO=8081 python3 trabajador/trabajador.py &
-$ PUERTO=8082 python3 trabajador/trabajador.py &
-$ python3 despachador/despachador.py --trabajadores http://localhost:8081,http://localhost:8082 \
-      --filtros gris,gaussiano --entrada lote/ --salida resultado/
+$ PUERTO=8000 OMP_NUM_THREADS=2 python3 trabajador/trabajador.py &
+$ URL_TRABAJADOR=http://localhost:8000 DATOS=/tmp/datos FILTROS=gris,gaussiano \
+      python3 despachador/despachador.py
 $ bash despachador/pruebas.sh
 ```
 
-La API del trabajador y el reparto están en `docs/01-arquitectura.md`. No
-hacen falta paquetes de Python fuera de la biblioteca estándar.
+Si `/tmp/datos/entrada/` está vacía, el despachador genera el lote de 64
+imágenes de 1024x1024. El contrato HTTP (`/procesar`, `/healthz`, `/readyz`) y
+el reparto están en `docs/01-arquitectura.md`. No hacen falta paquetes de Python
+fuera de la biblioteca estándar.
+
+## Servicio completo con Docker Compose
+
+Hace falta Docker con Compose. Desde la raíz del repositorio, una sola orden
+construye las imágenes, levanta los trabajadores y corre el lote:
+
+```console
+$ cd deploy/local
+$ docker compose up --build --scale trabajador=1
+$ docker compose up --build --scale trabajador=4
+$ bash medir.sh        # 1 y 4 trabajadores, deja mediciones/servicio.csv
+$ docker compose down -v
+```
+
+La cadena por defecto es `gris,gaussiano,sobel,otsu`; mientras Sobel y Otsu no
+estén implementados, el trabajador responde 501 a esa cadena y se puede probar
+con `FILTROS=gris,gaussiano docker compose up --build`. Detalle de las imágenes
+y del Compose en `docs/03-despliegue.md`.
 
 ## Convenciones que no cambian
 

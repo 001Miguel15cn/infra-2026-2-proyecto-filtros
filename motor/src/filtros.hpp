@@ -19,6 +19,13 @@ Imagen caja_paralelo(const Imagen& e);
 Imagen gaussiano_secuencial(const Imagen& e);
 Imagen gaussiano_paralelo(const Imagen& e);
 
+// Forma directa en 2D: el núcleo de 5x5 (producto externo de [1 4 6 4 1],
+// entre 256) aplicado en una sola pasada, con 25 multiplicaciones por píxel.
+// Es solo secuencial: existe para comparar su tiempo con el de la separable
+// (10 multiplicaciones por píxel) con un solo hilo. Se pide como
+// "gaussiano_directo". Su salida es idéntica byte a byte a la separable.
+Imagen gaussiano_directo(const Imagen& e);
+
 // Misma salida que gaussiano_paralelo, pero por bandas de filas para que la
 // intermedia quepa en caché. Se pide con el nombre "gaussiano_bandas".
 const int BANDA_FILAS = 32;
