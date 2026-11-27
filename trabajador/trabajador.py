@@ -1,16 +1,20 @@
 #!/usr/bin/env python3
 """Trabajador: expone el motor de filtros por HTTP.
 
-    GET  /salud                      -> 200 {"estado": "ok"}
+    GET  /healthz                    -> 200 si el proceso está vivo (liveness)
+    GET  /readyz                     -> 200 solo si el binario del motor está
+                                        presente y responde (readiness)
     POST /procesar?filtros=a,b,c     -> cuerpo: imagen PPM/PGM en crudo
-                                        respuesta: la imagen resultante
+                                        respuesta: la imagen resultante, con
+                                        X-Tiempo-Ms (lo que tardó el motor) y
+                                        X-Hilos (hilos con que corrió)
 
-Códigos de error: 400 (cadena o imagen inválida), 411/413 (cuerpo ausente o
+Códigos de error: 400 (filtro desconocido, cadena o imagen inválida), 411/413 (cuerpo ausente o
 demasiado grande), 501 (filtro sin implementar), 504 (el motor se pasó del
 tiempo), 500 (cualquier otra falla del motor).
 
-Variables de entorno: PUERTO, MOTOR, HILOS (OMP_NUM_THREADS del motor),
-TIEMPO_MAX (segundos), MAX_BYTES, MAX_CONCURRENTES.
+Variables de entorno: PUERTO (8000), MOTOR, OMP_NUM_THREADS (hilos del motor;
+HILOS lo sobrescribe), TIEMPO_MAX (segundos), MAX_BYTES, MAX_CONCURRENTES.
 """
 import json
 import os
@@ -25,8 +29,9 @@ from urllib.parse import parse_qs, urlparse
 
 AQUI = os.path.dirname(os.path.abspath(__file__))
 MOTOR = os.environ.get("MOTOR", os.path.join(AQUI, "..", "motor", "motor"))
-PUERTO = int(os.environ.get("PUERTO", "8080"))
-HILOS = os.environ.get("HILOS")
+PUERTO = int(os.environ.get("PUERTO", "8000"))
+# Hilos con que corre el motor: HILOS, si no OMP_NUM_THREADS, si no los núcleos.
+HILOS = os.environ.get("HILOS") or os.environ.get("OMP_NUM_THREADS") or str(os.cpu_count() or 1)
 TIEMPO_MAX = float(os.environ.get("TIEMPO_MAX", "120"))
 MAX_BYTES = int(os.environ.get("MAX_BYTES", str(512 * 1024 * 1024)))
 
@@ -35,6 +40,18 @@ MAX_BYTES = int(os.environ.get("MAX_BYTES", str(512 * 1024 * 1024)))
 turno = threading.BoundedSemaphore(int(os.environ.get("MAX_CONCURRENTES", "1")))
 
 FILTROS_OK = re.compile(r"^[a-z_]+(,[a-z_]+)*$")
+
+
+def motor_listo():
+    """El binario existe, es ejecutable y responde: sin argumentos imprime su
+    uso y sale con código 2, sin leer ninguna imagen."""
+    if not (os.path.isfile(MOTOR) and os.access(MOTOR, os.X_OK)):
+        return False
+    try:
+        r = subprocess.run([MOTOR], capture_output=True, timeout=5)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return r.returncode == 2 and b"uso:" in r.stderr
 
 
 class Manejador(BaseHTTPRequestHandler):
@@ -52,8 +69,14 @@ class Manejador(BaseHTTPRequestHandler):
         self.wfile.write(cuerpo)
 
     def do_GET(self):
-        if urlparse(self.path).path == "/salud":
-            self.responder(200, json.dumps({"estado": "ok"}), "application/json")
+        ruta = urlparse(self.path).path
+        if ruta == "/healthz":
+            self.responder(200, json.dumps({"estado": "vivo"}), "application/json")
+        elif ruta == "/readyz":
+            if motor_listo():
+                self.responder(200, json.dumps({"estado": "listo"}), "application/json")
+            else:
+                self.responder(503, json.dumps({"estado": "motor no disponible"}), "application/json")
         else:
             self.responder(404, "no existe\n")
 
@@ -70,7 +93,14 @@ class Manejador(BaseHTTPRequestHandler):
             self.close_connection = True
             self.responder(411, "falta Content-Length\n")
             return
-        largo = int(largo)
+        try:
+            largo = int(largo)
+        except ValueError:
+            largo = -1
+        if largo < 0:
+            self.close_connection = True
+            self.responder(400, "Content-Length inválido\n")
+            return
         if largo > MAX_BYTES:
             self.close_connection = True
             self.responder(413, "imagen demasiado grande\n")
@@ -86,8 +116,7 @@ class Manejador(BaseHTTPRequestHandler):
             with open(entrada, "wb") as f:
                 f.write(cuerpo)
             entorno = dict(os.environ)
-            if HILOS:
-                entorno["OMP_NUM_THREADS"] = HILOS
+            entorno["OMP_NUM_THREADS"] = HILOS
             inicio = time.time()
             try:
                 r = subprocess.run([MOTOR, filtros, entrada, salida], capture_output=True,
@@ -101,7 +130,8 @@ class Manejador(BaseHTTPRequestHandler):
                 with open(salida, "rb") as f:
                     imagen = f.read()
                 self.responder(200, imagen, "application/octet-stream",
-                               {"X-Milisegundos": "%.1f" % ms, "X-Trabajador": socket.gethostname()})
+                               {"X-Tiempo-Ms": "%.1f" % ms, "X-Hilos": HILOS,
+                                "X-Trabajador": socket.gethostname()})
             elif "sin implementar" in error:
                 self.responder(501, error + "\n")
             elif r.returncode in (1, 2):

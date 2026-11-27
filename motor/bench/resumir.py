@@ -43,3 +43,13 @@ for base in filtros:
             if fl == base and (nuevo, p) in mediana:
                 d = mediana[(nuevo, p)]
                 print(f"| {p} | {t:.1f} | {d:.1f} | {t / d:.2f}x |")
+
+# Un solo hilo: forma directa de 5x5 contra la separable. La mejora algorítmica
+# (25 multiplicaciones contra 10 por píxel) se mide antes de hablar de hilos.
+if "gaussiano_directo" in filtros and ("gaussiano", 1) in mediana:
+    td, ts = mediana[("gaussiano_directo", 1)], mediana[("gaussiano", 1)]
+    print("\nUn solo hilo, forma directa contra separable:\n")
+    print("| forma | mediana (ms) | frente a la directa |")
+    print("|---|---|---|")
+    print(f"| directa 5x5 | {td:.1f} | 1.00x |")
+    print(f"| separable | {ts:.1f} | {td / ts:.2f}x más rápida |")

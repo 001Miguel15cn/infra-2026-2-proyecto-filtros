@@ -19,7 +19,10 @@ arnes: bench/arnes.cpp src/filtros.cpp src/imagen.cpp
 pruebas: all
 	bash tests/pruebas.sh
 
+# Nombre que usa el flujo de GitHub Actions.
+test: pruebas
+
 clean:
 	rm -f $(BIN)
 
-.PHONY: all pruebas clean
+.PHONY: all pruebas test clean

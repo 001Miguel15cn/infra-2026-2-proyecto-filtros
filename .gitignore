@@ -10,3 +10,7 @@ motor/arnes
 *.pgm
 !motor/tests/datos/*.ppm
 !motor/tests/datos/*.pgm
+__pycache__/
+*.pyc
+build/
+.env
