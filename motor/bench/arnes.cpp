@@ -28,6 +28,7 @@ Imagen aplicar(const std::string& filtro, const Imagen& entrada, bool secuencial
     }
     if (filtro == "sobel") return secuencial ? sobel_secuencial(entrada) : sobel_paralelo(entrada);
     if (filtro == "otsu") return secuencial ? otsu_secuencial(entrada) : otsu_paralelo(entrada);
+    if (filtro == "otsu_atomico") return otsu_atomico(entrada);
     throw std::runtime_error("filtro desconocido: " + filtro);
 }
 

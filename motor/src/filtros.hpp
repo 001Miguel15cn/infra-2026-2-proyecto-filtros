@@ -32,5 +32,8 @@ Imagen sobel_paralelo(const Imagen& e);
 // histograma y binariza con él.
 Imagen otsu_secuencial(const Imagen& e);
 Imagen otsu_paralelo(const Imagen& e);
+// Misma salida, con un histograma compartido protegido con atomic. Solo para
+// la comparación contra el de histogramas privados.
+Imagen otsu_atomico(const Imagen& e);
 
 #endif

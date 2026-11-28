@@ -5,6 +5,8 @@
 #include <vector>
 #include <cstdint>
 #include <cmath>
+#include <omp.h>
+#include <string>
 
 Imagen gris_secuencial(const Imagen& e) {
     if (e.canales != 3) throw std::runtime_error("gris espera una imagen de tres canales");
@@ -250,10 +252,116 @@ Imagen sobel_paralelo(const Imagen& e) {
 }
 
 
-Imagen otsu_secuencial(const Imagen&) {
-    throw std::runtime_error("otsu: sin implementar");
+namespace {
+
+const int NIVELES = 256;
+
+// Histograma de un hilo. 256 contadores de 8 bytes son 2048 bytes (32 líneas
+// de caché de 64) y la estructura está alineada a 64, así que dos hilos nunca
+// escriben en la misma línea de caché aunque los histogramas queden contiguos
+// en el vector (sin false sharing).
+struct alignas(64) Contadores {
+    std::uint64_t h[NIVELES];
+};
+
+// Barrido de los 255 umbrales. Es secuencial en las dos versiones: el mismo
+// código sobre el mismo histograma entero, así que el umbral no puede diferir.
+// Maximiza w0 * w1 * (mu0 - mu1)^2 con pesos en píxeles y no en fracciones: eso
+// difiere de la varianza del enunciado en el factor constante 1/N^2, que no
+// cambia el argmax. En un empate gana el primer umbral (comparación estricta).
+// Si la imagen tiene un solo nivel no hay división posible y devuelve 0.
+int umbral_otsu(const std::uint64_t h[NIVELES], std::uint64_t total) {
+    std::uint64_t suma_total = 0;
+    for (int v = 0; v < NIVELES; ++v) suma_total += static_cast<std::uint64_t>(v) * h[v];
+
+    std::uint64_t peso0 = 0, suma0 = 0;
+    double mejor = -1.0;
+    int umbral = 0;
+    for (int t = 0; t < NIVELES - 1; ++t) {
+        peso0 += h[t];
+        suma0 += static_cast<std::uint64_t>(t) * h[t];
+        if (peso0 == 0) continue;
+        const std::uint64_t peso1 = total - peso0;
+        if (peso1 == 0) break;
+        const double mu0 = static_cast<double>(suma0) / static_cast<double>(peso0);
+        const double mu1 = static_cast<double>(suma_total - suma0) / static_cast<double>(peso1);
+        const double d = mu0 - mu1;
+        const double varianza = static_cast<double>(peso0) * static_cast<double>(peso1) * d * d;
+        if (varianza > mejor) {
+            mejor = varianza;
+            umbral = t;
+        }
+    }
+    return umbral;
 }
 
-Imagen otsu_paralelo(const Imagen&) {
-    throw std::runtime_error("otsu: sin implementar");
+// O(x,y) = 0 si I(x,y) <= umbral, 255 en otro caso.
+Imagen binarizar_secuencial(const Imagen& e, int umbral) {
+    Imagen s = vacia_como(e);
+    for (std::size_t k = 0; k < e.datos.size(); ++k) s.datos[k] = e.datos[k] <= umbral ? 0 : 255;
+    return s;
+}
+
+Imagen binarizar_paralelo(const Imagen& e, int umbral) {
+    Imagen s = vacia_como(e);
+    const std::size_t n = static_cast<std::size_t>(e.ancho);
+    // Map por filas: cada hilo escribe solo las suyas.
+    #pragma omp parallel for schedule(static)
+    for (int y = 0; y < e.alto; ++y) {
+        const std::size_t base = static_cast<std::size_t>(y) * n;
+        for (std::size_t k = 0; k < n; ++k) s.datos[base + k] = e.datos[base + k] <= umbral ? 0 : 255;
+    }
+    return s;
+}
+
+}  // namespace
+
+Imagen otsu_secuencial(const Imagen& e) {
+    exigir_un_canal(e, "otsu");
+    std::uint64_t h[NIVELES] = {};
+    for (unsigned char v : e.datos) ++h[v];
+    const int t = umbral_otsu(h, e.datos.size());
+    return binarizar_secuencial(e, t);
+}
+
+// Reducción con un histograma privado por hilo y suma al final. Los contadores
+// son enteros: la suma no depende del orden de los hilos y la salida es
+// idéntica a la secuencial.
+Imagen otsu_paralelo(const Imagen& e) {
+    exigir_un_canal(e, "otsu");
+    const int hilos = omp_get_max_threads();
+    std::vector<Contadores> privados(static_cast<std::size_t>(hilos));  // en cero
+    #pragma omp parallel num_threads(hilos)
+    {
+        std::uint64_t* mio = privados[static_cast<std::size_t>(omp_get_thread_num())].h;
+        #pragma omp for schedule(static)
+        for (int y = 0; y < e.alto; ++y) {
+            const unsigned char* fila = e.datos.data() + static_cast<std::size_t>(y) * e.ancho;
+            for (int x = 0; x < e.ancho; ++x) ++mio[fila[x]];
+        }
+    }
+    std::uint64_t h[NIVELES] = {};
+    for (const Contadores& c : privados) {
+        for (int v = 0; v < NIVELES; ++v) h[v] += c.h[v];
+    }
+    const int t = umbral_otsu(h, e.datos.size());
+    return binarizar_paralelo(e, t);
+}
+
+// Versión ingenua, solo para la comparación que pide el enunciado: un único
+// histograma compartido protegido con atomic. Da la misma salida, pero los
+// hilos compiten por los mismos 256 contadores.
+Imagen otsu_atomico(const Imagen& e) {
+    exigir_un_canal(e, "otsu");
+    std::uint64_t h[NIVELES] = {};
+    #pragma omp parallel for schedule(static)
+    for (int y = 0; y < e.alto; ++y) {
+        const unsigned char* fila = e.datos.data() + static_cast<std::size_t>(y) * e.ancho;
+        for (int x = 0; x < e.ancho; ++x) {
+            #pragma omp atomic
+            ++h[fila[x]];
+        }
+    }
+    const int t = umbral_otsu(h, e.datos.size());
+    return binarizar_paralelo(e, t);
 }
