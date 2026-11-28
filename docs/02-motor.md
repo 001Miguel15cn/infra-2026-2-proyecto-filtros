@@ -430,3 +430,232 @@ caché no crecen con los hilos, de modo que el perfilado no muestra un límite d
 memoria que una optimización de localidad pueda corregir; además, calcular
 $g_x$ y $g_y$ en un solo recorrido ya forma parte de la implementación base.
 La optimización del equipo se aplicó al gaussiano (ver su sección).
+
+
+## Histograma, ecualización y umbral de Otsu
+
+> Metodología y máquina: las declaradas al comienzo de este archivo (imagen de
+> 4096x4096, 5 repeticiones, se descarta la primera y se toma la mediana de las
+> cuatro restantes, hilos 1, 2, 4 y 8). Otsu recibe una imagen de un canal, así
+> que se mide sobre la imagen ya convertida a grises.
+
+### Qué calcula
+
+El histograma cuenta cuántos píxeles hay con cada intensidad, $h(v)$ para
+$v\in[0,255]$. Otsu escoge el umbral $t^*$ que mejor separa la imagen en dos
+clases, fondo y objeto, maximizando la varianza entre clases:
+
+$$
+\sigma_B^2(t)=\omega_0(t)\,\omega_1(t)\,\big(\mu_0(t)-\mu_1(t)\big)^2
+\qquad
+t^*=\arg\max_{0\le t<255}\sigma_B^2(t)
+$$
+
+con $\omega_0(t)=\sum_{v\le t}h(v)/N$, $\omega_1=1-\omega_0$, y $\mu_0$, $\mu_1$
+las medias de intensidad de cada clase. La salida es binaria:
+
+$$
+O(x,y)=\begin{cases}0 & I(x,y)\le t^*\\ 255 & \text{en otro caso}\end{cases}
+$$
+
+El patrón es una **reducción** (el histograma) seguida de un **barrido** de 255
+umbrales y de un **map** (la binarización).
+
+```mermaid
+flowchart LR
+    A["Imagen de un canal"] --> B["Histograma h(v)<br/>reducción: paralela"]
+    B --> C["Barrido de 255 umbrales<br/>secuencial"]
+    C --> D["Binarización<br/>map por filas: paralela"]
+    D --> E["Imagen binaria 0 / 255"]
+```
+
+### Decisiones de implementación
+
+- **Pesos en píxeles, no en fracciones.** El código maximiza
+  $w_0\,w_1\,(\mu_0-\mu_1)^2$ con $w_0=N\omega_0$ y $w_1=N\omega_1$. Difiere de
+  la fórmula del enunciado en el factor constante $1/N^2$, que no cambia el
+  $\arg\max$, y evita dividir entre $N$ en cada umbral.
+- **Contadores enteros** (`uint64_t`). El histograma y las sumas del barrido son
+  enteras, así que el resultado no depende del orden en que los hilos acumulen
+  (convención 3 del enunciado). Las únicas operaciones en coma flotante son las
+  de la varianza, y son idénticas en todas las versiones porque todas llaman a
+  la misma función `umbral_otsu` sobre el mismo histograma.
+- **Empates.** Gana el primer umbral con varianza máxima (comparación estricta
+  `>`). El enunciado no fija este caso, así que es una decisión propia.
+- **Imagen de un solo nivel.** No hay división posible (una de las dos clases
+  queda vacía), y la función devuelve $t^*=0$. Una imagen uniforme de valor $v>0$
+  sale toda en 255, y una toda en 0 sale toda en 0.
+- **Entrada de un canal.** Si recibe una imagen de color, `otsu` se rechaza con
+  `otsu espera una imagen de un canal`.
+
+Las versiones, en `motor/src/filtros.cpp`:
+
+| Versión | Qué hace |
+|---|---|
+| `otsu_secuencial` | histograma con un hilo, barrido y binarización |
+| `otsu_paralelo` | histograma con **un arreglo privado por hilo** y suma al final; barrido secuencial; binarización con `omp parallel for` por filas |
+| `otsu_atomico` | histograma **compartido** protegido con `omp atomic`; se usa solo para la comparación de más abajo |
+
+### Paralelización
+
+**Histograma (reducción).** Todos los píxeles escriben sobre los mismos 256
+contadores. La versión ingenua los protege con `#pragma omp atomic`: es
+correcta, pero cada incremento es una instrucción atómica y los hilos compiten
+por las mismas líneas de caché, de modo que el recorrido se serializa en la
+práctica. La versión pedida por el enunciado da a cada hilo su propio histograma
+y los suma al final:
+
+```cpp
+std::vector<Contadores> privados(hilos);            // uno por hilo, en cero
+#pragma omp parallel num_threads(hilos)
+{
+    std::uint64_t* mio = privados[omp_get_thread_num()].h;
+    #pragma omp for schedule(static)
+    for (int y = 0; y < e.alto; ++y)
+        for (int x = 0; x < e.ancho; ++x) ++mio[fila[x]];
+}
+// suma de los histogramas privados, 256 valores por hilo
+```
+
+El reparto va sobre las **filas**, por la misma razón que en Sobel: la imagen
+está por filas, un píxel es un byte, y una línea de caché de 64 bytes trae 64
+píxeles consecutivos. Cada hilo recibe una banda contigua y recorre la imagen en
+el orden en que está en memoria. `schedule(static)` basta porque el costo por
+píxel es uniforme.
+
+**False sharing entre los histogramas privados.** Cada histograma privado ocupa
+$256\times 8=2048$ bytes, es decir, 32 líneas de caché de 64 bytes. La
+estructura `Contadores` se declara con `alignas(64)`, así que cada histograma
+empieza en una frontera de línea de caché y ninguna línea queda compartida entre
+dos hilos, aunque los histogramas estén contiguos dentro del `std::vector`. Sin
+esa alineación, el final de un histograma y el comienzo del siguiente podrían
+caer en la misma línea, y dos hilos que escriben en ella se invalidarían la
+caché mutuamente sin compartir ningún dato. El costo de la solución es solo
+memoria: 2 KB por hilo.
+
+**Binarización (map).** Cada píxel de salida depende solo del de entrada en la
+misma posición. Se reparte por filas con `omp parallel for schedule(static)`.
+
+**Barrido de umbrales.** Se deja **secuencial**: son 255 iteraciones de unas
+pocas operaciones, despreciables frente a los $16\,777\,216$ píxeles de la
+imagen, y repartirlas costaría más en sincronización de lo que ahorraría. Es el
+argumento de la Ley de Amdahl que pide el enunciado; la estimación medida está
+más abajo.
+
+### Corrección
+
+`make pruebas` compara (completar con lo que quede en `tests/pruebas.sh`):
+
+- `otsu` paralelo contra el secuencial en 512x512, con `OMP_NUM_THREADS=1` y `8`;
+- `otsu_atomico` contra el secuencial;
+- la cadena completa `gris,gaussiano,sobel,otsu`, paralela contra secuencial,
+  con 1 y con 8 hilos;
+- una imagen con dos niveles (mitad 50, mitad 200), cuya salida debe ser mitad
+  0 y mitad 255, y una imagen uniforme, que no debe fallar;
+- tamaños pequeños y no múltiplos del reparto (1x1, 2x3, 5x1, 1x7, 37x41);
+- que `otsu` sobre una imagen de color se rechace.
+
+### Resultados
+
+Medianas de las cuatro repeticiones útiles, imagen de 4096x4096 en grises.
+
+| hilos | mediana (ms) | speedup | eficiencia |
+|---|---|---|---|
+| 1 | XX | 1.00 | 1.00 |
+| 2 | XX | XX | XX |
+| 4 | XX | XX | XX |
+| 8 | XX | XX | XX |
+
+**Histograma privado contra histograma compartido con `atomic`**, a igual
+número de hilos:
+
+| hilos | privado (ms) | atómico (ms) | el privado es más rápido |
+|---|---|---|---|
+| 1 | XX | XX | XXx |
+| 2 | XX | XX | XXx |
+| 4 | XX | XX | XXx |
+| 8 | XX | XX | XXx |
+
+**Cadena completa** `gris,gaussiano,sobel,otsu`:
+
+| hilos | mediana (ms) | speedup | eficiencia |
+|---|---|---|---|
+| 1 | XX | 1.00 | 1.00 |
+| 2 | XX | XX | XX |
+| 4 | XX | XX | XX |
+| 8 | XX | XX | XX |
+
+**Lectura** (escribir al tener las cifras finales, apoyada solo en ellas):
+
+- Con **un solo hilo** la versión atómica ya es XX veces más lenta: ahí no hay
+  competencia entre hilos, así que esa diferencia es el costo de cada
+  instrucción atómica sobre $16\,777\,216$ incrementos.
+- Al subir los hilos, el privado XX y el atómico XX. Esa divergencia es la
+  contención sobre los mismos 256 contadores.
+- Al comparar speedups, el del atómico puede parecer mejor porque su base de un
+  hilo es mucho peor. Por eso la comparación se hace sobre tiempos absolutos.
+- Otsu hace muy pocas cuentas por byte leído, así que es de esperar que lo
+  limite el ancho de banda de memoria compartido. Esto debe confirmarse con el
+  perfilado de abajo, no suponerse.
+
+### Fracción secuencial (Ley de Amdahl)
+
+Dentro de la llamada cronometrada hay tres partes que no se reparten: la
+inicialización a cero de la imagen de salida (`resize`), la suma de los
+histogramas privados y el barrido de 255 umbrales. Con $f$ la fracción
+secuencial y $S(p)$ el speedup medido,
+
+$$
+S(p)=\frac{1}{f+\frac{1-f}{p}}
+\qquad\Rightarrow\qquad
+f=\frac{1/S(p)-1/p}{1-1/p}
+$$
+
+Cronometrando solo `umbral_otsu` sobre el histograma de la imagen de medición
+se obtuvo XX µs, que son el XX % del tiempo total con 1 hilo (XX ms). Con los
+speedups medidos, $f$ vale XX con 2 hilos, XX con 4 y XX con 8.
+
+(Si $f$ resulta mucho mayor que el porcentaje del barrido, la diferencia no es
+código secuencial: es el límite de ancho de banda y la inicialización de la
+salida. Decirlo así.)
+
+### Perfilado
+
+Herramienta: `perf stat` sobre `arnes`, con los mismos eventos que en Sobel:
+
+```bash
+./motor gris /tmp/medicion.ppm /tmp/medicion_gris.pgm
+for f in otsu otsu_atomico; do
+  for h in 1 2 4 8; do
+    OMP_NUM_THREADS=$h LC_ALL=C perf stat -r 3 \
+      -e task-clock,cycles,instructions,cache-references,cache-misses \
+      ./arnes $f /tmp/medicion_gris.pgm 5 > /dev/null 2> /tmp/perf_${f}_$h.txt
+  done
+done
+```
+
+| versión | hilos | ciclos (mil millones) | instrucciones (mil millones) | IPC | fallos de caché (millones) | CPUs utilizadas |
+|---|---|---|---|---|---|---|
+| otsu | 1 | XX | XX | XX | XX | XX |
+| otsu | 4 | XX | XX | XX | XX | XX |
+| otsu_atomico | 1 | XX | XX | XX | XX | XX |
+| otsu_atomico | 4 | XX | XX | XX | XX | XX |
+
+**Conclusión** (escribirla con la salida real): qué número explica la
+diferencia entre el privado y el atómico (ciclos, IPC y CPUs utilizadas son los
+candidatos), y si los fallos de caché cambian con los hilos.
+
+### Optimización de localidad
+
+Elegir una de las dos opciones **según lo que muestre la tabla de eficiencia de
+todos los filtros en la corrida final**, y borrar la otra:
+
+**Opción A (si Otsu es el que peor escala).** Los histogramas privados con
+relleno a 64 bytes son la optimización de localidad: separan los contadores de
+cada hilo para que no compartan línea de caché. Se mide contra una versión sin
+`alignas(64)` y XX ms contra XX ms. (Solo escribir esto si se corrió esa
+versión; si no, usar la opción B.)
+
+**Opción B (si otro filtro escala peor).** No se aplicó una optimización de
+localidad a Otsu; la del equipo se aplicó a XX. Los histogramas privados ya van
+separados por relleno, y el perfilado muestra XX.
